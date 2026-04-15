@@ -1,0 +1,6 @@
+ultralytics         # YOLOv8 framework
+opencv-python       # Video processing and GUI
+pytesseract         # OCR wrapper for Tesseract
+pandas              # Data handling for logging
+numpy               # Numerical operations
+Pillow              # Image handling for OCR preprocessing
