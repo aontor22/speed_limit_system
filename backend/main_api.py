@@ -9,6 +9,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.detector import UniversalDetector
 from src.recognizer import SpeedRecognizer
 from src.utils import preprocess_for_ocr
+from src.database import init_db, get_recent_violations, insert_violation 
+
+# Initialize Database on script start
+init_db()
+
+# --- NEW: PHASE 2 ENDPOINTS ---
+
+
 
 app = FastAPI()
 
@@ -19,6 +27,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/api/history")
+async def get_history():
+    """
+    Endpoint to fetch the last 10 violation records.
+    Called by the React frontend to populate the history table.
+    """
+    history = get_recent_violations(limit=10)
+    return history
 
 # Initialize ML components once
 detector = UniversalDetector(sign_model_path="models/speed_limit_yolo.pt")
