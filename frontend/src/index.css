@@ -15,7 +15,7 @@ body {
   .cyber-border {
     @apply border border-cyber-cyan/30 bg-cyber-card/80 backdrop-blur-md;
   }
-  
+
   .neon-text-cyan {
     text-shadow: 0 0 8px rgba(0, 243, 255, 0.8);
   }
