@@ -59,7 +59,7 @@ function App() {
   }, []);
 
   return (
-    <div className="min-h-screen p-6 bg-cyber-dark text-white">
+    <div className="min-h-screen bg-cyber-dark text-white cyber-grid scanline-container font-mono">
       {/* Header same as Phase 3 */}
       <header className="mb-8 flex flex-col items-center border-b border-cyber-cyan/20 pb-4">
         <h1 className="text-4xl font-black italic neon-text-cyan text-cyber-cyan">TRAFFIC AI ENGINE</h1>
