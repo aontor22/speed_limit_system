@@ -44,6 +44,11 @@ def run_ai_logic():
         success, frame = cap.read()
         if not success: break
 
+        # cv2.imshow("Detection Feed", frame)
+
+        # if cv2.waitKey(1) & 0xFF == ord('q'):
+        #     break
+
         # Calculate FPS
         curr_time = time.time()
         fps = 1 / (curr_time - prev_time)
