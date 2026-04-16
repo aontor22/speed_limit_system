@@ -1,7 +1,7 @@
 import cv2
-from src.detector import UniversalDetector
-from src.recognizer import SpeedRecognizer
-from src.utils import preprocess_for_ocr
+from backend.src.detector import UniversalDetector
+from backend.src.recognizer import SpeedRecognizer
+from backend.src.utils import preprocess_for_ocr
 
 def main():
     # Setup
