@@ -78,6 +78,7 @@ def process_engine(frame, detector, recognizer):
 
 
 # --- AI THREAD ---
+# --- AI THREAD ---
 def run_ai_logic():
     global SYSTEM_CONFIG
     
@@ -88,23 +89,29 @@ def run_ai_logic():
 
     while not stop_event.is_set():
         mode = SYSTEM_CONFIG["mode"]
-        source = SYSTEM_CONFIG["source_path"] if mode != "webcam" else 0
-        
-        if mode in ["webcam", "video"]:
+        source = SYSTEM_CONFIG["source_path"]
+
+        # 🚫 DO NOT access webcam in backend
+        if mode == "webcam":
+            # Backend waits for frontend frames instead
+            time.sleep(0.1)
+            continue
+
+        # ✅ VIDEO MODE (only video file, not webcam)
+        if mode == "video" and source:
             cap = cv2.VideoCapture(source)
-            print(f"AI Thread: Starting {mode} stream...")
-            
+            print(f"AI Thread: Starting video stream...")
+
             while not stop_event.is_set() and not SYSTEM_CONFIG["new_input_ready"]:
                 success, frame = cap.read()
                 if not success:
-                    if mode == "video":
-                        break
-                    continue
+                    break
 
                 frame = process_engine(frame, detector, recognizer)
 
             cap.release()
 
+        # ✅ IMAGE MODE
         elif mode == "image" and source:
             print(f"AI Thread: Processing static image: {source}")
             frame = cv2.imread(source)
