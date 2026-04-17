@@ -85,7 +85,6 @@ def run_ai_logic():
     recognizer = SpeedRecognizer()
 
     window_name = "AI Pipeline - Speed Detection"
-    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
 
     while not stop_event.is_set():
         mode = SYSTEM_CONFIG["mode"]
@@ -104,10 +103,6 @@ def run_ai_logic():
 
                 frame = process_engine(frame, detector, recognizer)
 
-                cv2.imshow(window_name, frame)
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    stop_event.set()
-                
             cap.release()
 
         elif mode == "image" and source:
@@ -116,16 +111,13 @@ def run_ai_logic():
 
             if frame is not None:
                 frame = process_engine(frame, detector, recognizer)
-                cv2.imshow(window_name, frame)
-                cv2.waitKey(1000)
+            else:
+                print("AI Thread: Failed to read image.")
 
             SYSTEM_CONFIG["new_input_ready"] = False
 
         SYSTEM_CONFIG["new_input_ready"] = False
         time.sleep(0.1)
-
-    cv2.destroyAllWindows()
-
 
 # --- LIFESPAN ---
 from contextlib import asynccontextmanager
@@ -226,6 +218,31 @@ async def set_webcam():
     SYSTEM_CONFIG["source_path"] = None
     SYSTEM_CONFIG["new_input_ready"] = True
     return {"message": "Switched to Live Webcam"}
+
+@app.post("/api/process-frame")
+async def process_frame(file: UploadFile = File(...)):
+    contents = await file.read()
+
+    np_arr = np.frombuffer(contents, np.uint8)
+    frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+
+    if frame is None:
+        raise HTTPException(status_code=400, detail="Invalid frame")
+
+    # Run your existing AI pipeline
+    limit = process_single_frame(frame)
+    current_speed = 75  # replace later with real tracking logic
+
+    status = "Violation" if (limit > 0 and current_speed > limit) else "Safe"
+
+    return {
+        "current_speed": current_speed,
+        "speed_limit": limit,
+        "status": status,
+        "fps": 0,
+        "violation_detected": status == "Violation",
+        "timestamp": time.strftime("%H:%M:%S")
+    }
 
 
 if __name__ == "__main__":

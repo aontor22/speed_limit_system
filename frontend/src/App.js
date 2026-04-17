@@ -4,9 +4,9 @@ import { Activity, Gauge, AlertTriangle, ShieldCheck, Cpu, History } from 'lucid
 import StatCard from './components/StatCard';
 import RealTimeChart from './components/RealTimeChart';
 
-// 🔥 Use 127.0.0.1 instead of localhost (fixes many CORS issues)
-// const API_URL = "http://127.0.0.1:8000/api/data";
-const API_URL = "https://speed-limit-system.onrender.com/api/data";
+//  Backend API
+const API_URL = "http://127.0.0.1:8000/api/data";
+// const API_URL = "https://speed-limit-system.onrender.com/api/process-frame";
 
 function App() {
   const [data, setData] = useState({
@@ -22,54 +22,93 @@ function App() {
   const [fpsHistory, setFpsHistory] = useState(new Array(30).fill(0));
   const [violations, setViolations] = useState([]);
 
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
   const lastViolationRef = useRef(false);
 
+  // 🎥 Start webcam
   useEffect(() => {
-    let isMounted = true;
-
-    const fetchData = async () => {
+    const startCamera = async () => {
       try {
-        const response = await axios.get(API_URL);
-        const newData = response.data;
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: true
+        });
 
-        if (!isMounted) return;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
 
-        setData(newData);
-
-        // Update charts
-        setSpeedHistory(prev => [...prev.slice(1), newData.current_speed || 0]);
-        setFpsHistory(prev => [...prev.slice(1), newData.fps || 0]);
-
-        // Detect NEW violation only
-        if (newData.status === "Violation" && !lastViolationRef.current) {
-          const newRecord = {
-            id: Date.now(),
-            time: new Date().toLocaleTimeString(),
-            speed: newData.current_speed,
-            limit: newData.speed_limit,
-            status: "OVER-SPEED"
+          // force play (fixes stuck loading issue)
+          videoRef.current.onloadedmetadata = () => {
+            videoRef.current.play();
           };
-
-          setViolations(prev => [newRecord, ...prev].slice(0, 10));
-          lastViolationRef.current = true;
         }
 
-        if (newData.status === "Safe") {
-          lastViolationRef.current = false;
-        }
-
-      } catch (error) {
-        console.error("API Error:", error.message);
+      } catch (err) {
+        console.error("Camera error:", err);
       }
     };
 
-    // 🔥 Slightly slower = more stable
-    const interval = setInterval(fetchData, 1000);
+    startCamera();
+  }, []);
 
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-    };
+  // 🚀 Real-time frame sending loop
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+
+      if (!video || !canvas || !video.videoWidth) return;
+
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0);
+
+      canvas.toBlob(async (blob) => {
+        const formData = new FormData();
+        formData.append("file", blob, "frame.jpg");
+
+        try {
+          const response = await axios.post(API_URL, formData, {
+            headers: {
+              "Content-Type": "multipart/form-data"
+            }
+          });
+
+          const newData = response.data;
+          setData(newData);
+
+          // 📊 Update charts
+          setSpeedHistory(prev => [...prev.slice(1), newData.current_speed || 0]);
+          setFpsHistory(prev => [...prev.slice(1), newData.fps || 0]);
+
+          // 🚨 Detect violation (only once per event)
+          if (newData.status === "Violation" && !lastViolationRef.current) {
+            const newRecord = {
+              id: Date.now(),
+              time: new Date().toLocaleTimeString(),
+              speed: newData.current_speed,
+              limit: newData.speed_limit,
+              status: "OVER-SPEED"
+            };
+
+            setViolations(prev => [newRecord, ...prev].slice(0, 10));
+            lastViolationRef.current = true;
+          }
+
+          if (newData.status === "Safe") {
+            lastViolationRef.current = false;
+          }
+
+        } catch (err) {
+          console.error("Frame send error:", err.message);
+        }
+      }, "image/jpeg");
+
+    }, 200); // 🔥 5 FPS (adjust 100–500ms)
+
+    return () => clearInterval(interval);
   }, []);
 
   return (
@@ -81,6 +120,21 @@ function App() {
           TRAFFIC AI ENGINE
         </h1>
       </header>
+
+      {/* 🎥 LIVE CAMERA PREVIEW */}
+      <div className="flex justify-center mb-6">
+        <video
+          ref={videoRef}
+          autoPlay
+          muted
+          playsInline
+          onLoadedMetadata={() => {
+            videoRef.current?.play();
+          }}
+          className="w-80 h-60 rounded-lg border border-cyber-cyan bg-black"
+        />
+        <canvas ref={canvasRef} style={{ display: "none" }} />
+      </div>
 
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
@@ -107,7 +161,7 @@ function App() {
         </div>
       </div>
 
-      {/* Table */}
+      {/* Violation Table */}
       <div className="cyber-border rounded-lg overflow-hidden">
         <div className="bg-cyber-cyan/10 p-4 border-b border-cyber-cyan/20 flex items-center gap-2">
           <History size={18} className="text-cyber-cyan" />
