@@ -5,7 +5,8 @@ import StatCard from './components/StatCard';
 import RealTimeChart from './components/RealTimeChart';
 
 // 🔥 Use 127.0.0.1 instead of localhost (fixes many CORS issues)
-const API_URL = "http://127.0.0.1:8000/api/data";
+// const API_URL = "http://127.0.0.1:8000/api/data";
+const API_URL = "https://speed-limit-system.onrender.com/api/data";
 
 function App() {
   const [data, setData] = useState({

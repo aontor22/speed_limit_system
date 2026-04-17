@@ -135,15 +135,16 @@ async def lifespan(app: FastAPI):
     print("Shutting down AI thread...")
 
 
-# ✅ SINGLE APP INSTANCE (FIXED)
+# SINGLE APP INSTANCE (FIXED)
 app = FastAPI(lifespan=lifespan)
 
-# ✅ CORRECT CORS POSITION (FIXED)
+# CORRECT CORS POSITION (FIXED)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
-        "http://127.0.0.1:3000"
+        "http://127.0.0.1:3000",
+        "https://speed-limit-system.onrender.com"
     ],
     allow_credentials=True,
     allow_methods=["*"],
