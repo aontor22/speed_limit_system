@@ -14,6 +14,14 @@ from src.database import init_db, get_recent_violations, insert_violation
 # Initialize Database on script start
 init_db()
 
+# --- SYSTEM CONFIGURATION ---
+# This allows us to switch modes dynamically
+SYSTEM_CONFIG = {
+    "mode": "webcam",        # "webcam", "video", or "image"
+    "source_path": None,     # Path for uploaded video or image
+    "new_input_ready": False # Flag to tell the thread to restart/refresh
+}
+
 # --- NEW: PHASE 2 ENDPOINTS ---
 stop_event = threading.Event()
 
@@ -75,48 +83,59 @@ def process_single_frame(frame):
 
 # --- EXISTING REAL-TIME THREAD (Phase 1-5 legacy) ---
 def run_ai_logic():
-    global traffic_data
-
-    cap = cv2.VideoCapture(0)
-    prev_time = 0
-
+    global traffic_data, SYSTEM_CONFIG
+    
+    detector = UniversalDetector(sign_model_path="models/speed_limit_yolo.pt")
+    recognizer = SpeedRecognizer()
     window_name = "AI Pipeline - Speed Detection"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
 
-    try:
-        while not stop_event.is_set() and cap.isOpened():
-            success, frame = cap.read()
-            if not success:
-                break
+    while not stop_event.is_set():
+        mode = SYSTEM_CONFIG["mode"]
+        source = SYSTEM_CONFIG["source_path"] if mode != "webcam" else 0
+        
+        # --- BRANCH A: STREAM MODES (Webcam or Video) ---
+        if mode in ["webcam", "video"]:
+            cap = cv2.VideoCapture(source)
+            print(f"AI Thread: Starting {mode} stream...")
+            
+            while not stop_event.is_set() and not SYSTEM_CONFIG["new_input_ready"]:
+                success, frame = cap.read()
+                if not success:
+                    # If video ends, reset or loop
+                    if mode == "video": break 
+                    continue
 
-            curr_time = time.time()
-            fps = 1 / (curr_time - prev_time) if prev_time != 0 else 0
-            prev_time = curr_time
+                # Process Frame (Your existing YOLO + OCR logic)
+                # annotated_frame, results = process_engine(frame, detector, recognizer)
+                
+                frame = process_engine(frame, detector, recognizer)
+                cv2.imshow(window_name, frame)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    stop_event.set()
+                
+            cap.release()
 
-            # Reuse helper
-            limit = process_single_frame(frame)
+        # --- BRANCH B: STATIC MODE (Image) ---
+        elif mode == "image" and source:
+            print(f"AI Thread: Processing static image: {source}")
+            frame = cv2.imread(source)
+            if frame is not None:
+                # Process Image Once
+                # annotated_frame, results = process_engine(frame, detector, recognizer)
+                
+                frame = process_engine(frame, detector, recognizer)
+                cv2.imshow(window_name, frame)
+                cv2.waitKey(1000) # Show for 1 second minimum
+            
+            # Reset flag and wait for next input
+            SYSTEM_CONFIG["new_input_ready"] = False
 
-            # Update Global State
-            traffic_data["current_speed"] = 75
-            traffic_data["speed_limit"] = limit
-            traffic_data["fps"] = round(fps, 1)
-            traffic_data["status"] = "Violation" if (limit > 0 and 75 > limit) else "Safe"
-            traffic_data["timestamp"] = time.strftime("%H:%M:%S")
+        # IDLE: Prevent the thread from consuming 100% CPU when waiting for input
+        SYSTEM_CONFIG["new_input_ready"] = False
+        time.sleep(0.1)
 
-            # ✅ SHOW WINDOW (NEW)
-            cv2.imshow(window_name, frame)
-
-            # ✅ PRESS 'q' TO STOP
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                stop_event.set()
-                break
-
-            time.sleep(0.01)
-
-    finally:
-        cap.release()
-        cv2.destroyAllWindows()
-        print("AI Thread stopped cleanly.")
+    cv2.destroyAllWindows()
 
 from contextlib import asynccontextmanager
 
@@ -134,6 +153,26 @@ async def lifespan(app: FastAPI):
     print("Shutting down AI thread...")
 
 app = FastAPI(lifespan=lifespan)
+
+def process_engine(frame, detector, recognizer):
+    global traffic_data
+
+    # Use your existing logic
+    limit = process_single_frame(frame)
+
+    current_speed = 75  # simulated
+
+    # Update global state
+    traffic_data["current_speed"] = current_speed
+    traffic_data["speed_limit"] = limit
+    traffic_data["status"] = "Violation" if (limit > 0 and current_speed > limit) else "Safe"
+    traffic_data["timestamp"] = time.strftime("%H:%M:%S")
+
+    return frame  # return for display
+
+@app.get("/")
+def root():
+    return {"message": "Speed Detection API is running"}
 
 # --- NEW: PHASE 1 ENDPOINTS ---
 
