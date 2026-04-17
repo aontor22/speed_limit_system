@@ -117,7 +117,7 @@ function App() {
       {/* Header */}
       <header className="mb-8 flex flex-col items-center border-b border-cyber-cyan/20 pb-4">
         <h1 className="text-4xl font-black italic neon-text-cyan text-cyber-cyan">
-          TRAFFIC AI ENGINE
+          Speed Limit Sign Detection System
         </h1>
       </header>
 

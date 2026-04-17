@@ -1,66 +1,42 @@
-import sqlite3
+from sqlalchemy import create_engine, Column, Integer, String, DateTime
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 
-DB_PATH = "database.db"
+# 1. Database Configuration
+# Format: postgresql://[user]:[password]@[host]:[port]/[database_name]
+DATABASE_URL = "postgresql://postgres:11Udoy##@localhost:5432/traffic_db"
 
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+# 2. Violation Table Model
+class Violation(Base):
+    __tablename__ = "violations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(DateTime, default=datetime.now)
+    detected_speed = Column(Integer)
+    speed_limit = Column(Integer)
+    status = Column(String) # e.g., "Over-speeding"
+
+# 3. Auto-Create Table
 def init_db():
-    """
-    Initializes the SQLite database and creates the violations table if it doesn't exist.
-    """
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS violations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TEXT NOT NULL,
-            detected_speed INTEGER,
-            speed_limit INTEGER,
-            status TEXT
+    Base.metadata.create_all(bind=engine)
+
+# 4. Helper to save violation
+def save_violation(speed, limit):
+    db = SessionLocal()
+    try:
+        new_violation = Violation(
+            detected_speed=speed,
+            speed_limit=limit,
+            status="Over-speeding"
         )
-    ''')
-    conn.commit()
-    conn.close()
-    print("Database initialized successfully.")
-
-def insert_violation(detected_speed, speed_limit, status):
-    """
-    Inserts a new record into the violations table.
-    """
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        cursor.execute('''
-            INSERT INTO violations (timestamp, detected_speed, speed_limit, status)
-            VALUES (?, ?, ?, ?)
-        ''', (timestamp, detected_speed, speed_limit, status))
-        
-        conn.commit()
-        conn.close()
-        return True
+        db.add(new_violation)
+        db.commit()
     except Exception as e:
-        print(f"Database Insert Error: {e}")
-        return False
-
-def get_recent_violations(limit=10):
-    """
-    Retrieves the last N violations from the database.
-    """
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        # This allows us to access columns by name like a dictionary
-        conn.row_factory = sqlite3.Row 
-        cursor = conn.cursor()
-        
-        cursor.execute('SELECT * FROM violations ORDER BY id DESC LIMIT ?', (limit,))
-        rows = cursor.fetchall()
-        
-        # Convert sqlite3.Row objects to list of dictionaries for JSON response
-        results = [dict(row) for row in rows]
-        
-        conn.close()
-        return results
-    except Exception as e:
-        print(f"Database Fetch Error: {e}")
-        return []
+        print(f"Database Error: {e}")
+    finally:
+        db.close()

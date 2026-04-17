@@ -11,10 +11,7 @@ from contextlib import asynccontextmanager
 from src.detector import UniversalDetector
 from src.recognizer import SpeedRecognizer
 from src.utils import preprocess_for_ocr
-from src.database import init_db, get_recent_violations, insert_violation 
-
-# Initialize Database
-init_db()
+from src.database import init_db, save_violation
 
 # --- SYSTEM CONFIGURATION ---
 SYSTEM_CONFIG = {
@@ -76,8 +73,6 @@ def process_engine(frame, detector, recognizer):
 
     return frame
 
-
-# --- AI THREAD ---
 # --- AI THREAD ---
 def run_ai_logic():
     global SYSTEM_CONFIG
@@ -136,6 +131,9 @@ async def lifespan(app: FastAPI):
         shutil.rmtree(UPLOAD_DIR)
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     print("Cleaned old uploads.")
+
+    # Initialize Database
+    init_db()
 
     # Start AI thread
     thread = threading.Thread(target=run_ai_logic, daemon=True)

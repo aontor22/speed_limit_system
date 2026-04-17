@@ -4,4 +4,6 @@ python-multipart
 opencv-python-headless
 pytesseract
 ultralytics
+sqlalchemy
+psycopg2-binary
 torch --index-url https://download.pytorch.org/whl/cpu
