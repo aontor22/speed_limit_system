@@ -4,7 +4,8 @@ import { Activity, Gauge, AlertTriangle, ShieldCheck, Cpu, History } from 'lucid
 import StatCard from './components/StatCard';
 import RealTimeChart from './components/RealTimeChart';
 
-const API_URL = "http://localhost:8000/api/data";
+// 🔥 Use 127.0.0.1 instead of localhost (fixes many CORS issues)
+const API_URL = "http://127.0.0.1:8000/api/data";
 
 function App() {
   const [data, setData] = useState({
@@ -16,28 +17,30 @@ function App() {
     timestamp: ""
   });
 
-  // History states
   const [speedHistory, setSpeedHistory] = useState(new Array(30).fill(0));
   const [fpsHistory, setFpsHistory] = useState(new Array(30).fill(0));
   const [violations, setViolations] = useState([]);
-  
-  // Ref to track last violation state to avoid duplicate logs
+
   const lastViolationRef = useRef(false);
 
   useEffect(() => {
+    let isMounted = true;
+
     const fetchData = async () => {
       try {
         const response = await axios.get(API_URL);
         const newData = response.data;
 
+        if (!isMounted) return;
+
         setData(newData);
 
-        // Update Chart Data (Keep last 30 values)
-        setSpeedHistory(prev => [...prev.slice(1), newData.current_speed]);
-        setFpsHistory(prev => [...prev.slice(1), newData.fps]);
+        // Update charts
+        setSpeedHistory(prev => [...prev.slice(1), newData.current_speed || 0]);
+        setFpsHistory(prev => [...prev.slice(1), newData.fps || 0]);
 
-        // Logging Logic: If violation detected and it's "New"
-        if (newData.violation_detected && !lastViolationRef.current) {
+        // Detect NEW violation only
+        if (newData.status === "Violation" && !lastViolationRef.current) {
           const newRecord = {
             id: Date.now(),
             time: new Date().toLocaleTimeString(),
@@ -45,27 +48,40 @@ function App() {
             limit: newData.speed_limit,
             status: "OVER-SPEED"
           };
-          setViolations(prev => [newRecord, ...prev].slice(0, 10)); // Keep last 10
+
+          setViolations(prev => [newRecord, ...prev].slice(0, 10));
+          lastViolationRef.current = true;
         }
-        lastViolationRef.current = newData.violation_detected;
+
+        if (newData.status === "Safe") {
+          lastViolationRef.current = false;
+        }
 
       } catch (error) {
-        console.error("API Error:", error);
+        console.error("API Error:", error.message);
       }
     };
 
-    const interval = setInterval(fetchData, 500);
-    return () => clearInterval(interval);
+    // 🔥 Slightly slower = more stable
+    const interval = setInterval(fetchData, 1000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, []);
 
   return (
     <div className="min-h-screen bg-cyber-dark text-white cyber-grid scanline-container font-mono">
-      {/* Header same as Phase 3 */}
+
+      {/* Header */}
       <header className="mb-8 flex flex-col items-center border-b border-cyber-cyan/20 pb-4">
-        <h1 className="text-4xl font-black italic neon-text-cyan text-cyber-cyan">TRAFFIC AI ENGINE</h1>
+        <h1 className="text-4xl font-black italic neon-text-cyan text-cyber-cyan">
+          TRAFFIC AI ENGINE
+        </h1>
       </header>
 
-      {/* Stats Grid */}
+      {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <StatCard title="Speed" value={data.current_speed} unit="KM/H" icon={Gauge} colorClass="text-cyber-cyan" />
         <StatCard title="Limit" value={data.speed_limit} unit="KM/H" icon={ShieldCheck} colorClass="text-cyber-green" />
@@ -73,24 +89,32 @@ function App() {
         <StatCard title="Alerts" value={violations.length} icon={AlertTriangle} colorClass="text-cyber-red" />
       </div>
 
-      {/* Middle Section: Charts */}
+      {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         <div className="cyber-border p-4 rounded-lg h-64">
-          <h3 className="text-xs font-bold text-gray-400 mb-4 uppercase tracking-tighter">Live Speed Analytics</h3>
+          <h3 className="text-xs font-bold text-gray-400 mb-4 uppercase tracking-tighter">
+            Live Speed Analytics
+          </h3>
           <RealTimeChart dataArray={speedHistory} label="Speed" color="#00f3ff" />
         </div>
+
         <div className="cyber-border p-4 rounded-lg h-64">
-          <h3 className="text-xs font-bold text-gray-400 mb-4 uppercase tracking-tighter">Engine Performance (FPS)</h3>
+          <h3 className="text-xs font-bold text-gray-400 mb-4 uppercase tracking-tighter">
+            Engine Performance (FPS)
+          </h3>
           <RealTimeChart dataArray={fpsHistory} label="FPS" color="#ff00ff" />
         </div>
       </div>
 
-      {/* Bottom Section: Violation Table */}
+      {/* Table */}
       <div className="cyber-border rounded-lg overflow-hidden">
         <div className="bg-cyber-cyan/10 p-4 border-b border-cyber-cyan/20 flex items-center gap-2">
           <History size={18} className="text-cyber-cyan" />
-          <h3 className="font-bold uppercase tracking-widest text-sm">Violation History Log</h3>
+          <h3 className="font-bold uppercase tracking-widest text-sm">
+            Violation History Log
+          </h3>
         </div>
+
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="text-gray-500 text-xs uppercase bg-black/40">
@@ -100,9 +124,14 @@ function App() {
               <th className="p-4 text-right">Severity</th>
             </tr>
           </thead>
+
           <tbody>
             {violations.length === 0 ? (
-              <tr><td colSpan="4" className="p-10 text-center text-gray-600 italic">No violations recorded in this session.</td></tr>
+              <tr>
+                <td colSpan="4" className="p-10 text-center text-gray-600 italic">
+                  No violations recorded in this session.
+                </td>
+              </tr>
             ) : (
               violations.map(v => (
                 <tr key={v.id} className="border-t border-white/5 hover:bg-white/5 transition-colors">
@@ -120,6 +149,7 @@ function App() {
           </tbody>
         </table>
       </div>
+
     </div>
   );
 }
