@@ -3,5 +3,6 @@ uvicorn
 python-multipart
 fastapi[all]
 opencv-python
+opencv-python-headless
 pytesseract
 ultralytics

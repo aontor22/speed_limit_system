@@ -23,6 +23,11 @@ SYSTEM_CONFIG = {
     "new_input_ready": False
 }
 
+# Create uploads directory if it doesn't exist
+UPLOAD_DIR = "uploads"
+if not os.path.exists(UPLOAD_DIR):
+    os.makedirs(UPLOAD_DIR)
+
 stop_event = threading.Event()
 
 # --- SHARED STATE ---
@@ -123,14 +128,24 @@ def run_ai_logic():
 
 
 # --- LIFESPAN ---
+from contextlib import asynccontextmanager
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # CLEAN UPLOADS HERE (FIXED)
+    if os.path.exists(UPLOAD_DIR):
+        shutil.rmtree(UPLOAD_DIR)
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    print("Cleaned old uploads.")
+
+    # Start AI thread
     thread = threading.Thread(target=run_ai_logic, daemon=True)
     thread.start()
     print("AI Thread started.")
-    
+
     yield
-    
+
+    # Shutdown
     stop_event.set()
     print("Shutting down AI thread...")
 
@@ -144,7 +159,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://127.0.0.1:3000",
-        "https://speed-limit-system.onrender.com"
+        # "https://speed-limit-system.onrender.com"
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -168,70 +183,49 @@ async def get_traffic_data():
     return traffic_data
 
 
-@app.post("/api/upload-image")
+@app.post("/upload/image")
 async def upload_image(file: UploadFile = File(...)):
-    contents = await file.read()
-    nparr = np.frombuffer(contents, np.uint8)
-    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-
-    if frame is None:
-        raise HTTPException(status_code=400, detail="Invalid image file")
-
-    detected_limit = process_single_frame(frame)
+    global SYSTEM_CONFIG
     
-    my_speed = 80
-    status = "Violation" if (detected_limit > 0 and my_speed > detected_limit) else "Safe"
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-    return {
-        "detected_speed_limit": detected_limit,
-        "your_speed": my_speed,
-        "status": status,
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-    }
-
-
-@app.post("/api/upload-video")
-async def upload_video(file: UploadFile = File(...)):
-    temp_path = f"temp_{file.filename}"
-
-    with open(temp_path, "wb") as buffer:
+    file_path = os.path.join(UPLOAD_DIR, file.filename)
+    
+    with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
+    
+    SYSTEM_CONFIG["mode"] = "image"
+    SYSTEM_CONFIG["source_path"] = file_path
+    SYSTEM_CONFIG["new_input_ready"] = True
+    
+    return {"message": "Image uploaded successfully", "filename": file.filename}
 
-    cap = cv2.VideoCapture(temp_path)
 
-    max_limit_found = 0
-    violations_count = 0
-    frame_count = 0
-    start_time = time.time()
+@app.post("/upload/video")
+async def upload_video(file: UploadFile = File(...)):
+    global SYSTEM_CONFIG
+    
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
-        
-        frame_count += 1
+    file_path = os.path.join(UPLOAD_DIR, file.filename)
+    
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    
+    SYSTEM_CONFIG["mode"] = "video"
+    SYSTEM_CONFIG["source_path"] = file_path
+    SYSTEM_CONFIG["new_input_ready"] = True
+    
+    return {"message": "Video uploaded successfully", "filename": file.filename}
 
-        if frame_count % 10 == 0:
-            limit = process_single_frame(frame)
 
-            if limit > max_limit_found:
-                max_limit_found = limit
-
-            if limit > 0 and 80 > limit:
-                violations_count += 1
-
-    cap.release()
-    os.remove(temp_path)
-
-    total_time = time.time() - start_time
-    avg_fps = round(frame_count / total_time, 2) if total_time > 0 else 0
-
-    return {
-        "max_speed_limit_detected": max_limit_found,
-        "total_violations_in_video": violations_count,
-        "average_processing_fps": avg_fps,
-        "frames_processed": frame_count
-    }
+@app.post("/api/set-webcam")
+async def set_webcam():
+    global SYSTEM_CONFIG
+    SYSTEM_CONFIG["mode"] = "webcam"
+    SYSTEM_CONFIG["source_path"] = None
+    SYSTEM_CONFIG["new_input_ready"] = True
+    return {"message": "Switched to Live Webcam"}
 
 
 if __name__ == "__main__":
