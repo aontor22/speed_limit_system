@@ -58,11 +58,12 @@ def process_single_frame(frame):
             if processed_crop is not None:
                 speed_text = recognizer.extract_speed(processed_crop)
 
-                # FIX: handle None, int, string, noisy OCR
                 if speed_text is not None:
                     speed_text = str(speed_text)
 
-                    # Extract digits safely (handles "80", "Speed 60", etc.)
+                    # ✅ ALWAYS PRINT (fixed)
+                    print("OCR RAW:", speed_text)
+
                     digits = re.findall(r'\d+', speed_text)
                     if digits:
                         detected_limit = int(digits[0])
@@ -72,7 +73,7 @@ def process_single_frame(frame):
 
 # --- MAIN PROCESS ENGINE ---
 def process_engine(frame, detector, recognizer):
-    global traffic_data
+    global traffic_data, violation_in_progress
 
     try:
         limit = process_single_frame(frame)
@@ -80,9 +81,6 @@ def process_engine(frame, detector, recognizer):
 
         is_violation = (limit > 0 and current_speed > limit)
 
-        # -------------------------------
-        # PHASE 5: DB LOGIC (FINAL)
-        # -------------------------------
         if is_violation:
             if not violation_in_progress:
                 print(" NEW VIOLATION → Saving to DB")
@@ -90,40 +88,31 @@ def process_engine(frame, detector, recognizer):
                 violation_in_progress = True
         else:
             violation_in_progress = False
-        # -------------------------------
 
-        # Update dashboard state
         traffic_data["current_speed"] = current_speed
         traffic_data["speed_limit"] = limit
         traffic_data["status"] = "Violation" if is_violation else "Safe"
         traffic_data["timestamp"] = time.strftime("%H:%M:%S")
 
     except Exception as e:
-        # CRASH PROTECTION (VERY IMPORTANT)
         print("AI ERROR:", e)
 
+    print(f"DEBUG → Speed: {current_speed}, Limit: {limit}")
     return frame
+
 
 # --- AI THREAD ---
 def run_ai_logic():
-    global SYSTEM_CONFIG
-
-    # detector = UniversalDetector(sign_model_path="models/speed_limit_yolo.pt")
-    # recognizer = SpeedRecognizer()
-
-    window_name = "AI Pipeline - Speed Detection"
+    global SYSTEM_CONFIG, detector, recognizer
 
     while not stop_event.is_set():
         mode = SYSTEM_CONFIG["mode"]
         source = SYSTEM_CONFIG["source_path"]
 
-        # DO NOT access webcam in backend
         if mode == "webcam":
-            # Backend waits for frontend frames instead
             time.sleep(0.1)
             continue
 
-        # VIDEO MODE (only video file, not webcam)
         if mode == "video" and source:
             cap = cv2.VideoCapture(source)
             print(f"AI Thread: Starting video stream...")
@@ -137,7 +126,6 @@ def run_ai_logic():
 
             cap.release()
 
-        # IMAGE MODE
         elif mode == "image" and source:
             print(f"AI Thread: Processing static image: {source}")
             frame = cv2.imread(source)
@@ -147,41 +135,37 @@ def run_ai_logic():
             else:
                 print("AI Thread: Failed to read image.")
 
+            # ✅ FIXED (moved outside else)
+            SYSTEM_CONFIG["mode"] = "idle"
+            SYSTEM_CONFIG["source_path"] = None
             SYSTEM_CONFIG["new_input_ready"] = False
 
         SYSTEM_CONFIG["new_input_ready"] = False
         time.sleep(0.1)
 
-# --- LIFESPAN ---
-from contextlib import asynccontextmanager
 
+# --- LIFESPAN ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # CLEAN UPLOADS HERE (FIXED)
     if os.path.exists(UPLOAD_DIR):
         shutil.rmtree(UPLOAD_DIR)
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     print("Cleaned old uploads.")
 
-    # Initialize Database
     init_db()
 
-    # Start AI thread
     thread = threading.Thread(target=run_ai_logic, daemon=True)
     thread.start()
     print("AI Thread started.")
 
     yield
 
-    # Shutdown
     stop_event.set()
     print("Shutting down AI thread...")
 
 
-# SINGLE APP INSTANCE (FIXED)
 app = FastAPI(lifespan=lifespan)
 
-# CORRECT CORS POSITION (FIXED)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -210,13 +194,10 @@ async def get_history():
 async def get_traffic_data():
     return traffic_data
 
+
 @app.post("/api/data")
 async def receive_frame(file: UploadFile = File(...)):
     contents = await file.read()
-
-    # Convert to OpenCV frame
-    import numpy as np
-    import cv2
 
     np_arr = np.frombuffer(contents, np.uint8)
     frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
@@ -224,17 +205,14 @@ async def receive_frame(file: UploadFile = File(...)):
     if frame is None:
         return {"error": "Invalid image"}
 
-    # Run AI
-    result_frame = process_engine(frame, detector, recognizer)
-
+    process_engine(frame, detector, recognizer)
     return {"status": "processed"}
+
 
 @app.post("/upload/image")
 async def upload_image(file: UploadFile = File(...)):
     global SYSTEM_CONFIG
     
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-
     file_path = os.path.join(UPLOAD_DIR, file.filename)
     
     with open(file_path, "wb") as buffer:
@@ -251,8 +229,6 @@ async def upload_image(file: UploadFile = File(...)):
 async def upload_video(file: UploadFile = File(...)):
     global SYSTEM_CONFIG
     
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-
     file_path = os.path.join(UPLOAD_DIR, file.filename)
     
     with open(file_path, "wb") as buffer:
@@ -273,6 +249,7 @@ async def set_webcam():
     SYSTEM_CONFIG["new_input_ready"] = True
     return {"message": "Switched to Live Webcam"}
 
+
 @app.post("/api/process-frame")
 async def process_frame(file: UploadFile = File(...)):
     contents = await file.read()
@@ -283,20 +260,10 @@ async def process_frame(file: UploadFile = File(...)):
     if frame is None:
         raise HTTPException(status_code=400, detail="Invalid frame")
 
-    # Run your existing AI pipeline
-    limit = process_single_frame(frame)
-    current_speed = 75  # replace later with real tracking logic
+    # FIXED: run full pipeline (includes DB save)
+    process_engine(frame, detector, recognizer)
 
-    status = "Violation" if (limit > 0 and current_speed > limit) else "Safe"
-
-    return {
-        "current_speed": current_speed,
-        "speed_limit": limit,
-        "status": status,
-        "fps": 0,
-        "violation_detected": status == "Violation",
-        "timestamp": time.strftime("%H:%M:%S")
-    }
+    return traffic_data
 
 
 if __name__ == "__main__":
