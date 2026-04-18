@@ -21,6 +21,7 @@ SYSTEM_CONFIG = {
     "new_input_ready": False
 }
 
+# ✅ FIX 1: initialize global variable
 violation_in_progress = False
 
 # Create uploads directory if it doesn't exist
@@ -48,20 +49,26 @@ recognizer = SpeedRecognizer()
 def process_single_frame(frame):
     detected_limit = 0
     sign_results = detector.detect_signs(frame)
-    
+
+    print("DETECTIONS:", len(sign_results))  # DEBUG
+
     for r in sign_results:
         for box in r.boxes:
+            print("BOX FOUND")  # DEBUG
+
             x1, y1, x2, y2 = map(int, box.xyxy[0])
             sign_crop = frame[y1:y2, x1:x2]
+
+            # Save debug crop
+            cv2.imwrite("debug_crop.jpg", sign_crop)
+
             processed_crop = preprocess_for_ocr(sign_crop)
-            
+
             if processed_crop is not None:
                 speed_text = recognizer.extract_speed(processed_crop)
 
                 if speed_text is not None:
                     speed_text = str(speed_text)
-
-                    # ✅ ALWAYS PRINT (fixed)
                     print("OCR RAW:", speed_text)
 
                     digits = re.findall(r'\d+', speed_text)
@@ -79,16 +86,20 @@ def process_engine(frame, detector, recognizer):
         limit = process_single_frame(frame)
         current_speed = 75
 
+        print(f"DEBUG → Speed: {current_speed}, Limit: {limit}")
+
         is_violation = (limit > 0 and current_speed > limit)
 
+        # --- DB LOGIC ---
         if is_violation:
             if not violation_in_progress:
-                print(" NEW VIOLATION → Saving to DB")
+                print("NEW VIOLATION → Saving to DB")
                 save_violation(speed=current_speed, limit=limit)
                 violation_in_progress = True
         else:
             violation_in_progress = False
 
+        # --- Update state ---
         traffic_data["current_speed"] = current_speed
         traffic_data["speed_limit"] = limit
         traffic_data["status"] = "Violation" if is_violation else "Safe"
@@ -97,50 +108,51 @@ def process_engine(frame, detector, recognizer):
     except Exception as e:
         print("AI ERROR:", e)
 
-    print(f"DEBUG → Speed: {current_speed}, Limit: {limit}")
     return frame
 
 
 # --- AI THREAD ---
 def run_ai_logic():
-    global SYSTEM_CONFIG, detector, recognizer
+    global SYSTEM_CONFIG
 
     while not stop_event.is_set():
         mode = SYSTEM_CONFIG["mode"]
         source = SYSTEM_CONFIG["source_path"]
 
+        # Webcam handled in frontend
         if mode == "webcam":
             time.sleep(0.1)
             continue
 
+        # VIDEO MODE
         if mode == "video" and source:
             cap = cv2.VideoCapture(source)
-            print(f"AI Thread: Starting video stream...")
+            print("AI Thread: Starting video...")
 
             while not stop_event.is_set() and not SYSTEM_CONFIG["new_input_ready"]:
                 success, frame = cap.read()
                 if not success:
                     break
 
-                frame = process_engine(frame, detector, recognizer)
+                process_engine(frame, detector, recognizer)
 
             cap.release()
 
+        # IMAGE MODE
         elif mode == "image" and source:
-            print(f"AI Thread: Processing static image: {source}")
+            print(f"AI Thread: Processing image: {source}")
             frame = cv2.imread(source)
 
             if frame is not None:
-                frame = process_engine(frame, detector, recognizer)
+                process_engine(frame, detector, recognizer)
             else:
-                print("AI Thread: Failed to read image.")
+                print("Failed to read image")
 
-            # ✅ FIXED (moved outside else)
+            # ✅ FIX 2: STOP LOOPING
             SYSTEM_CONFIG["mode"] = "idle"
             SYSTEM_CONFIG["source_path"] = None
             SYSTEM_CONFIG["new_input_ready"] = False
 
-        SYSTEM_CONFIG["new_input_ready"] = False
         time.sleep(0.1)
 
 
@@ -150,20 +162,21 @@ async def lifespan(app: FastAPI):
     if os.path.exists(UPLOAD_DIR):
         shutil.rmtree(UPLOAD_DIR)
     os.makedirs(UPLOAD_DIR, exist_ok=True)
-    print("Cleaned old uploads.")
+    print("Cleaned uploads")
 
     init_db()
 
     thread = threading.Thread(target=run_ai_logic, daemon=True)
     thread.start()
-    print("AI Thread started.")
+    print("AI Thread started")
 
     yield
 
     stop_event.set()
-    print("Shutting down AI thread...")
+    print("Shutting down...")
 
 
+# --- APP ---
 app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
@@ -182,7 +195,7 @@ app.add_middleware(
 # --- ROUTES ---
 @app.get("/")
 def root():
-    return {"message": "Speed Detection API is running"}
+    return {"message": "Speed Detection API running"}
 
 
 @app.get("/api/history")
@@ -191,63 +204,22 @@ async def get_history():
 
 
 @app.get("/api/data")
-async def get_traffic_data():
+async def get_data():
     return traffic_data
-
-
-@app.post("/api/data")
-async def receive_frame(file: UploadFile = File(...)):
-    contents = await file.read()
-
-    np_arr = np.frombuffer(contents, np.uint8)
-    frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-
-    if frame is None:
-        return {"error": "Invalid image"}
-
-    process_engine(frame, detector, recognizer)
-    return {"status": "processed"}
 
 
 @app.post("/upload/image")
 async def upload_image(file: UploadFile = File(...)):
-    global SYSTEM_CONFIG
-    
     file_path = os.path.join(UPLOAD_DIR, file.filename)
-    
+
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-    
+
     SYSTEM_CONFIG["mode"] = "image"
     SYSTEM_CONFIG["source_path"] = file_path
     SYSTEM_CONFIG["new_input_ready"] = True
-    
-    return {"message": "Image uploaded successfully", "filename": file.filename}
 
-
-@app.post("/upload/video")
-async def upload_video(file: UploadFile = File(...)):
-    global SYSTEM_CONFIG
-    
-    file_path = os.path.join(UPLOAD_DIR, file.filename)
-    
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    
-    SYSTEM_CONFIG["mode"] = "video"
-    SYSTEM_CONFIG["source_path"] = file_path
-    SYSTEM_CONFIG["new_input_ready"] = True
-    
-    return {"message": "Video uploaded successfully", "filename": file.filename}
-
-
-@app.post("/api/set-webcam")
-async def set_webcam():
-    global SYSTEM_CONFIG
-    SYSTEM_CONFIG["mode"] = "webcam"
-    SYSTEM_CONFIG["source_path"] = None
-    SYSTEM_CONFIG["new_input_ready"] = True
-    return {"message": "Switched to Live Webcam"}
+    return {"message": "Image uploaded"}
 
 
 @app.post("/api/process-frame")
@@ -260,10 +232,17 @@ async def process_frame(file: UploadFile = File(...)):
     if frame is None:
         raise HTTPException(status_code=400, detail="Invalid frame")
 
-    # FIXED: run full pipeline (includes DB save)
-    process_engine(frame, detector, recognizer)
+    limit = process_single_frame(frame)
+    current_speed = 75
 
-    return traffic_data
+    status = "Violation" if (limit > 0 and current_speed > limit) else "Safe"
+
+    return {
+        "current_speed": current_speed,
+        "speed_limit": limit,
+        "status": status,
+        "timestamp": time.strftime("%H:%M:%S")
+    }
 
 
 if __name__ == "__main__":
