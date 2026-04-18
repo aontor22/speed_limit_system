@@ -4,8 +4,8 @@ import { Activity, Gauge, AlertTriangle, ShieldCheck, Cpu, History } from 'lucid
 import StatCard from './components/StatCard';
 import RealTimeChart from './components/RealTimeChart';
 
-//  Backend API
-const API_URL = "http://127.0.0.1:8000/api/data";
+// Backend API
+const API_URL = "http://127.0.0.1:8000/api/process-frame";
 // const API_URL = "https://speed-limit-system.onrender.com/api/process-frame";
 
 function App() {
@@ -22,6 +22,9 @@ function App() {
   const [fpsHistory, setFpsHistory] = useState(new Array(30).fill(0));
   const [violations, setViolations] = useState([]);
 
+  // ✅ NEW: mode control
+  const [currentMode, setCurrentMode] = useState("webcam");
+
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const lastViolationRef = useRef(false);
@@ -37,7 +40,6 @@ function App() {
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
 
-          // force play (fixes stuck loading issue)
           videoRef.current.onloadedmetadata = () => {
             videoRef.current.play();
           };
@@ -51,9 +53,13 @@ function App() {
     startCamera();
   }, []);
 
-  // 🚀 Real-time frame sending loop
+  // 🚀 Real-time frame sending loop (FIXED WITH MODE CONTROL)
   useEffect(() => {
     const interval = setInterval(async () => {
+
+      // ❗ STOP sending frames if not webcam mode
+      if (currentMode !== "webcam") return;
+
       const video = videoRef.current;
       const canvas = canvasRef.current;
 
@@ -79,11 +85,11 @@ function App() {
           const newData = response.data;
           setData(newData);
 
-          // 📊 Update charts
+          // 📊 Charts
           setSpeedHistory(prev => [...prev.slice(1), newData.current_speed || 0]);
           setFpsHistory(prev => [...prev.slice(1), newData.fps || 0]);
 
-          // 🚨 Detect violation (only once per event)
+          // 🚨 Violation tracking
           if (newData.status === "Violation" && !lastViolationRef.current) {
             const newRecord = {
               id: Date.now(),
@@ -106,10 +112,36 @@ function App() {
         }
       }, "image/jpeg");
 
-    }, 200); // 🔥 5 FPS (adjust 100–500ms)
+    }, 200);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [currentMode]); // ✅ dependency added
+
+  // ============================
+  // ✅ NEW: Upload Handlers
+  // ============================
+  const handleFileUpload = async (event, type) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const endpoint = type === "image" ? "/upload/image" : "/upload/video";
+      await axios.post(`http://127.0.0.1:8000${endpoint}`, formData);
+
+      setCurrentMode(type);
+      alert(`${type.toUpperCase()} uploaded successfully`);
+    } catch (err) {
+      console.error("Upload failed:", err);
+    }
+  };
+
+  const switchToWebcam = async () => {
+    await axios.post("http://127.0.0.1:8000/api/set-webcam");
+    setCurrentMode("webcam");
+  };
 
   return (
     <div className="min-h-screen bg-cyber-dark text-white cyber-grid scanline-container font-mono">
@@ -121,16 +153,47 @@ function App() {
         </h1>
       </header>
 
-      {/* 🎥 LIVE CAMERA PREVIEW */}
+      {/* ========================= */}
+      {/* ✅ NEW: CONTROL PANEL */}
+      {/* ========================= */}
+      <div className="mb-6 flex gap-4 justify-center">
+
+        <button
+          onClick={switchToWebcam}
+          className="px-4 py-2 border border-cyber-cyan text-cyber-cyan hover:bg-cyber-cyan/10"
+        >
+          Webcam
+        </button>
+
+        <label className="cursor-pointer px-4 py-2 border border-white hover:bg-white/10">
+          Upload Image
+          <input
+            type="file"
+            hidden
+            accept="image/*"
+            onChange={(e) => handleFileUpload(e, "image")}
+          />
+        </label>
+
+        <label className="cursor-pointer px-4 py-2 border border-white hover:bg-white/10">
+          Upload Video
+          <input
+            type="file"
+            hidden
+            accept="video/*"
+            onChange={(e) => handleFileUpload(e, "video")}
+          />
+        </label>
+
+      </div>
+
+      {/* 🎥 CAMERA */}
       <div className="flex justify-center mb-6">
         <video
           ref={videoRef}
           autoPlay
           muted
           playsInline
-          onLoadedMetadata={() => {
-            videoRef.current?.play();
-          }}
           className="w-80 h-60 rounded-lg border border-cyber-cyan bg-black"
         />
         <canvas ref={canvasRef} style={{ display: "none" }} />
@@ -147,60 +210,41 @@ function App() {
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         <div className="cyber-border p-4 rounded-lg h-64">
-          <h3 className="text-xs font-bold text-gray-400 mb-4 uppercase tracking-tighter">
-            Live Speed Analytics
-          </h3>
+          <h3 className="text-xs text-gray-400 mb-4 uppercase">Live Speed</h3>
           <RealTimeChart dataArray={speedHistory} label="Speed" color="#00f3ff" />
         </div>
 
         <div className="cyber-border p-4 rounded-lg h-64">
-          <h3 className="text-xs font-bold text-gray-400 mb-4 uppercase tracking-tighter">
-            Engine Performance (FPS)
-          </h3>
+          <h3 className="text-xs text-gray-400 mb-4 uppercase">FPS</h3>
           <RealTimeChart dataArray={fpsHistory} label="FPS" color="#ff00ff" />
         </div>
       </div>
 
-      {/* Violation Table */}
+      {/* Table */}
       <div className="cyber-border rounded-lg overflow-hidden">
-        <div className="bg-cyber-cyan/10 p-4 border-b border-cyber-cyan/20 flex items-center gap-2">
-          <History size={18} className="text-cyber-cyan" />
-          <h3 className="font-bold uppercase tracking-widest text-sm">
-            Violation History Log
-          </h3>
+        <div className="bg-cyber-cyan/10 p-4">
+          <h3 className="font-bold text-sm">Violation History</h3>
         </div>
 
-        <table className="w-full text-left border-collapse">
+        <table className="w-full text-left">
           <thead>
-            <tr className="text-gray-500 text-xs uppercase bg-black/40">
-              <th className="p-4">Timestamp</th>
-              <th className="p-4">Recorded Speed</th>
-              <th className="p-4">Zone Limit</th>
-              <th className="p-4 text-right">Severity</th>
+            <tr className="text-gray-500 text-xs">
+              <th className="p-4">Time</th>
+              <th className="p-4">Speed</th>
+              <th className="p-4">Limit</th>
+              <th className="p-4">Status</th>
             </tr>
           </thead>
 
           <tbody>
-            {violations.length === 0 ? (
-              <tr>
-                <td colSpan="4" className="p-10 text-center text-gray-600 italic">
-                  No violations recorded in this session.
-                </td>
+            {violations.map(v => (
+              <tr key={v.id}>
+                <td className="p-4">{v.time}</td>
+                <td className="p-4">{v.speed}</td>
+                <td className="p-4">{v.limit}</td>
+                <td className="p-4 text-cyber-red">{v.status}</td>
               </tr>
-            ) : (
-              violations.map(v => (
-                <tr key={v.id} className="border-t border-white/5 hover:bg-white/5 transition-colors">
-                  <td className="p-4 font-mono text-cyber-cyan">{v.time}</td>
-                  <td className="p-4 font-bold">{v.speed} km/h</td>
-                  <td className="p-4 text-gray-400">{v.limit} km/h</td>
-                  <td className="p-4 text-right">
-                    <span className="px-2 py-1 bg-cyber-red/20 text-cyber-red text-[10px] font-bold rounded border border-cyber-red/40">
-                      {v.status}
-                    </span>
-                  </td>
-                </tr>
-              ))
-            )}
+            ))}
           </tbody>
         </table>
       </div>

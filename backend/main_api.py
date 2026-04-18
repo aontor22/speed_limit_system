@@ -61,22 +61,36 @@ def process_single_frame(frame):
 
 
 def process_engine(frame, detector, recognizer):
-    global traffic_data
+    global traffic_data, violation_in_progress
 
     limit = process_single_frame(frame)
     current_speed = 75
 
+    is_violation = (limit > 0 and current_speed > limit)
+
+    # -------------------------------
+    # 🚀 PHASE 5: DB LOGIC (FIXED)
+    # -------------------------------
+    if is_violation:
+        if not violation_in_progress:
+            print("🚨 NEW VIOLATION → Saving to DB")
+            save_violation(speed=current_speed, limit=limit)
+            violation_in_progress = True
+    else:
+        violation_in_progress = False
+    # -------------------------------
+
     traffic_data["current_speed"] = current_speed
     traffic_data["speed_limit"] = limit
-    traffic_data["status"] = "Violation" if (limit > 0 and current_speed > limit) else "Safe"
+    traffic_data["status"] = "Violation" if is_violation else "Safe"
     traffic_data["timestamp"] = time.strftime("%H:%M:%S")
 
     return frame
 
 # --- AI THREAD ---
 def run_ai_logic():
-    global SYSTEM_CONFIG
-    
+    global SYSTEM_CONFIG, violation_in_progress
+
     # detector = UniversalDetector(sign_model_path="models/speed_limit_yolo.pt")
     # recognizer = SpeedRecognizer()
 
@@ -156,7 +170,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://127.0.0.1:3000",
-        # "https://speed-limit-system.onrender.com"
+        "https://speed-limit-system.onrender.com"
     ],
     allow_credentials=True,
     allow_methods=["*"],
