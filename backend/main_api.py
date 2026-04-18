@@ -3,6 +3,7 @@ import time
 import cv2
 import numpy as np
 import shutil
+import re
 import os
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,7 +12,7 @@ from contextlib import asynccontextmanager
 from src.detector import UniversalDetector
 from src.recognizer import SpeedRecognizer
 from src.utils import preprocess_for_ocr
-from src.database import init_db, save_violation
+from src.database import init_db, save_violation, get_recent_violations
 
 # --- SYSTEM CONFIGURATION ---
 SYSTEM_CONFIG = {
@@ -19,6 +20,8 @@ SYSTEM_CONFIG = {
     "source_path": None,
     "new_input_ready": False
 }
+
+violation_in_progress = False
 
 # Create uploads directory if it doesn't exist
 UPLOAD_DIR = "uploads"
@@ -54,42 +57,56 @@ def process_single_frame(frame):
             
             if processed_crop is not None:
                 speed_text = recognizer.extract_speed(processed_crop)
-                if speed_text.isdigit():
-                    detected_limit = int(speed_text)
-                    
+
+                # FIX: handle None, int, string, noisy OCR
+                if speed_text is not None:
+                    speed_text = str(speed_text)
+
+                    # Extract digits safely (handles "80", "Speed 60", etc.)
+                    digits = re.findall(r'\d+', speed_text)
+                    if digits:
+                        detected_limit = int(digits[0])
+
     return detected_limit
 
 
+# --- MAIN PROCESS ENGINE ---
 def process_engine(frame, detector, recognizer):
-    global traffic_data, violation_in_progress
+    global traffic_data
 
-    limit = process_single_frame(frame)
-    current_speed = 75
+    try:
+        limit = process_single_frame(frame)
+        current_speed = 75
 
-    is_violation = (limit > 0 and current_speed > limit)
+        is_violation = (limit > 0 and current_speed > limit)
 
-    # -------------------------------
-    # 🚀 PHASE 5: DB LOGIC (FIXED)
-    # -------------------------------
-    if is_violation:
-        if not violation_in_progress:
-            print("🚨 NEW VIOLATION → Saving to DB")
-            save_violation(speed=current_speed, limit=limit)
-            violation_in_progress = True
-    else:
-        violation_in_progress = False
-    # -------------------------------
+        # -------------------------------
+        # PHASE 5: DB LOGIC (FINAL)
+        # -------------------------------
+        if is_violation:
+            if not violation_in_progress:
+                print(" NEW VIOLATION → Saving to DB")
+                save_violation(speed=current_speed, limit=limit)
+                violation_in_progress = True
+        else:
+            violation_in_progress = False
+        # -------------------------------
 
-    traffic_data["current_speed"] = current_speed
-    traffic_data["speed_limit"] = limit
-    traffic_data["status"] = "Violation" if is_violation else "Safe"
-    traffic_data["timestamp"] = time.strftime("%H:%M:%S")
+        # Update dashboard state
+        traffic_data["current_speed"] = current_speed
+        traffic_data["speed_limit"] = limit
+        traffic_data["status"] = "Violation" if is_violation else "Safe"
+        traffic_data["timestamp"] = time.strftime("%H:%M:%S")
+
+    except Exception as e:
+        # CRASH PROTECTION (VERY IMPORTANT)
+        print("AI ERROR:", e)
 
     return frame
 
 # --- AI THREAD ---
 def run_ai_logic():
-    global SYSTEM_CONFIG, violation_in_progress
+    global SYSTEM_CONFIG
 
     # detector = UniversalDetector(sign_model_path="models/speed_limit_yolo.pt")
     # recognizer = SpeedRecognizer()
