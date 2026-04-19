@@ -29,7 +29,7 @@ function App() {
   const canvasRef = useRef(null);
   const lastViolationRef = useRef(false);
 
-  // 🎥 Start webcam
+  // Start webcam
   useEffect(() => {
     const startCamera = async () => {
       try {
