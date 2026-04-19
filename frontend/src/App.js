@@ -22,7 +22,7 @@ function App() {
   const [fpsHistory, setFpsHistory] = useState(new Array(30).fill(0));
   const [violations, setViolations] = useState([]);
 
-  // ✅ NEW: mode control
+  // NEW: mode control
   const [currentMode, setCurrentMode] = useState("webcam");
 
   const videoRef = useRef(null);
