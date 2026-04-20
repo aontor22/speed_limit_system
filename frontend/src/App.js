@@ -6,8 +6,8 @@ import StatCard from './components/StatCard';
 import RealTimeChart from './components/RealTimeChart';
 
 // Backend API
-const API_URL = "http://127.0.0.1:8000/api/process-frame";
-// const API_URL = "https://speed-limit-system.onrender.com/api/process-frame";
+// bconst API_URL = "http://127.0.0.1:8000/api/process-frame";
+const API_URL = "https://speed-limit-system.onrender.com/api/process-frame";
 
 function App() {
   const [data, setData] = useState({
