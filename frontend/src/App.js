@@ -130,7 +130,9 @@ function App() {
 
     try {
       const endpoint = type === "image" ? "/upload/image" : "/upload/video";
-      await axios.post(`http://127.0.0.1:8000${endpoint}`, formData);
+      // await axios.post(`http://127.0.0.1:8000${endpoint}`, formData);
+      await axios.post(`https://speed-limit-system.onrender.com${endpoint}`, formData);
+      
 
       setCurrentMode(type);
       alert(`${type.toUpperCase()} uploaded successfully`);
@@ -140,7 +142,9 @@ function App() {
   };
 
   const switchToWebcam = async () => {
-    await axios.post("http://127.0.0.1:8000/api/set-webcam");
+    // await axios.post("http://127.0.0.1:8000/api/set-webcam");
+    await axios.post("https://speed-limit-system.onrender.com/api/set-webcam");
+    
     setCurrentMode("webcam");
   };
 
