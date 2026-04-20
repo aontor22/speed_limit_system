@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { Activity, Gauge, AlertTriangle, ShieldCheck, Cpu, History } from 'lucide-react';
+// History, Activity
+import { Gauge, AlertTriangle, ShieldCheck, Cpu } from 'lucide-react';
 import StatCard from './components/StatCard';
 import RealTimeChart from './components/RealTimeChart';
 
