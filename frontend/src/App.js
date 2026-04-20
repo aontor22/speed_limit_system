@@ -1,12 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-// History, Activity
 import { Gauge, AlertTriangle, ShieldCheck, Cpu } from 'lucide-react';
 import StatCard from './components/StatCard';
 import RealTimeChart from './components/RealTimeChart';
 
 // Backend API
-// bconst API_URL = "http://127.0.0.1:8000/api/process-frame";
 const API_URL = "https://speed-limit-system.onrender.com/api/process-frame";
 
 function App() {
@@ -22,15 +20,16 @@ function App() {
   const [speedHistory, setSpeedHistory] = useState(new Array(30).fill(0));
   const [fpsHistory, setFpsHistory] = useState(new Array(30).fill(0));
   const [violations, setViolations] = useState([]);
-
-  // NEW: mode control
   const [currentMode, setCurrentMode] = useState("webcam");
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const lastViolationRef = useRef(false);
 
-  // Start webcam
+  // ✅ NEW: prevent overlapping requests
+  const isSendingRef = useRef(false);
+
+  // 🎥 Start webcam
   useEffect(() => {
     const startCamera = async () => {
       try {
@@ -40,12 +39,10 @@ function App() {
 
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-
           videoRef.current.onloadedmetadata = () => {
             videoRef.current.play();
           };
         }
-
       } catch (err) {
         console.error("Camera error:", err);
       }
@@ -54,12 +51,14 @@ function App() {
     startCamera();
   }, []);
 
-  // 🚀 Real-time frame sending loop (FIXED WITH MODE CONTROL)
+  // 🚀 Optimized frame sending loop
   useEffect(() => {
     const interval = setInterval(async () => {
 
-      // ❗ STOP sending frames if not webcam mode
       if (currentMode !== "webcam") return;
+
+      // ❗ prevent spamming server
+      if (isSendingRef.current) return;
 
       const video = videoRef.current;
       const canvas = canvasRef.current;
@@ -73,14 +72,19 @@ function App() {
       ctx.drawImage(video, 0, 0);
 
       canvas.toBlob(async (blob) => {
+        if (!blob) return;
+
         const formData = new FormData();
         formData.append("file", blob, "frame.jpg");
+
+        isSendingRef.current = true;
 
         try {
           const response = await axios.post(API_URL, formData, {
             headers: {
               "Content-Type": "multipart/form-data"
-            }
+            },
+            timeout: 10000 // ✅ prevent hanging
           });
 
           const newData = response.data;
@@ -110,16 +114,19 @@ function App() {
 
         } catch (err) {
           console.error("Frame send error:", err.message);
+        } finally {
+          isSendingRef.current = false;
         }
+
       }, "image/jpeg");
 
-    }, 200);
+    }, 1000); // ✅ FIXED: 1 request/sec (was 200ms)
 
     return () => clearInterval(interval);
-  }, [currentMode]); // ✅ dependency added
+  }, [currentMode]);
 
   // ============================
-  // ✅ NEW: Upload Handlers
+  // Upload Handlers
   // ============================
   const handleFileUpload = async (event, type) => {
     const file = event.target.files[0];
@@ -130,22 +137,34 @@ function App() {
 
     try {
       const endpoint = type === "image" ? "/upload/image" : "/upload/video";
-      // await axios.post(`http://127.0.0.1:8000${endpoint}`, formData);
-      await axios.post(`https://speed-limit-system.onrender.com${endpoint}`, formData);
-      
+
+      await axios.post(
+        `https://speed-limit-system.onrender.com${endpoint}`,
+        formData,
+        { timeout: 20000 }
+      );
 
       setCurrentMode(type);
       alert(`${type.toUpperCase()} uploaded successfully`);
+
     } catch (err) {
-      console.error("Upload failed:", err);
+      console.error("Upload failed:", err.message);
     }
   };
 
   const switchToWebcam = async () => {
-    // await axios.post("http://127.0.0.1:8000/api/set-webcam");
-    await axios.post("https://speed-limit-system.onrender.com/api/set-webcam");
-    
-    setCurrentMode("webcam");
+    try {
+      await axios.post(
+        "https://speed-limit-system.onrender.com/api/set-webcam",
+        {},
+        { timeout: 10000 }
+      );
+
+      setCurrentMode("webcam");
+
+    } catch (err) {
+      console.error("Switch mode error:", err.message);
+    }
   };
 
   return (
@@ -158,9 +177,7 @@ function App() {
         </h1>
       </header>
 
-      {/* ========================= */}
-      {/* ✅ NEW: CONTROL PANEL */}
-      {/* ========================= */}
+      {/* Control Panel */}
       <div className="mb-6 flex gap-4 justify-center">
 
         <button
@@ -192,7 +209,7 @@ function App() {
 
       </div>
 
-      {/* 🎥 CAMERA */}
+      {/* Camera */}
       <div className="flex justify-center mb-6">
         <video
           ref={videoRef}
