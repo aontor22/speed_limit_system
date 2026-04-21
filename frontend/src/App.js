@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
+<<<<<<< HEAD
 import { Activity, Gauge, AlertTriangle, ShieldCheck, Cpu } from 'lucide-react';
 import StatCard from './components/StatCard';
 import RealTimeChart from './components/RealTimeChart';
@@ -8,6 +9,14 @@ import RealTimeChart from './components/RealTimeChart';
 const API_BASE = "http://127.0.0.1:8000";
 const FRAME_API = `${API_BASE}/api/process-frame`;
 const HISTORY_API = `${API_BASE}/api/history`;
+=======
+import { Gauge, AlertTriangle, ShieldCheck, Cpu } from 'lucide-react';
+import StatCard from './components/StatCard';
+import RealTimeChart from './components/RealTimeChart';
+
+// Backend API
+const API_URL = "https://speed-limit-system.onrender.com/api/process-frame";
+>>>>>>> 7649f753494aa861a6e333284bef4c1909ec3e6f
 
 function App() {
   const [data, setData] = useState({
@@ -27,6 +36,9 @@ function App() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const lastViolationRef = useRef(false);
+
+  // ✅ NEW: prevent overlapping requests
+  const isSendingRef = useRef(false);
 
   // 🎥 Start webcam
   useEffect(() => {
@@ -56,11 +68,18 @@ function App() {
     };
   }, []);
 
+<<<<<<< HEAD
   // 🚀 Frame loop (ONLY webcam mode)
+=======
+  // 🚀 Optimized frame sending loop
+>>>>>>> 7649f753494aa861a6e333284bef4c1909ec3e6f
   useEffect(() => {
     const interval = setInterval(async () => {
 
       if (currentMode !== "webcam") return;
+
+      // ❗ prevent spamming server
+      if (isSendingRef.current) return;
 
       const video = videoRef.current;
       const canvas = canvasRef.current;
@@ -74,12 +93,25 @@ function App() {
       ctx.drawImage(video, 0, 0);
 
       canvas.toBlob(async (blob) => {
+        if (!blob) return;
+
         const formData = new FormData();
         formData.append("file", blob, "frame.jpg");
 
+        isSendingRef.current = true;
+
         try {
+<<<<<<< HEAD
           const res = await axios.post(FRAME_API, formData);
           const newData = res.data;
+=======
+          const response = await axios.post(API_URL, formData, {
+            headers: {
+              "Content-Type": "multipart/form-data"
+            },
+            timeout: 10000 // ✅ prevent hanging
+          });
+>>>>>>> 7649f753494aa861a6e333284bef4c1909ec3e6f
 
           setData(newData);
 
@@ -105,14 +137,22 @@ function App() {
 
         } catch (err) {
           console.error("Frame send error:", err.message);
+        } finally {
+          isSendingRef.current = false;
         }
+
       }, "image/jpeg");
 
+<<<<<<< HEAD
     }, 300);
+=======
+    }, 1000); // ✅ FIXED: 1 request/sec (was 200ms)
+>>>>>>> 7649f753494aa861a6e333284bef4c1909ec3e6f
 
     return () => clearInterval(interval);
   }, [currentMode]);
 
+<<<<<<< HEAD
   // 📦 Fetch DB history
   const fetchHistory = async () => {
     try {
@@ -129,6 +169,11 @@ function App() {
   }, []);
 
   // 📤 Upload handler (FIXED)
+=======
+  // ============================
+  // Upload Handlers
+  // ============================
+>>>>>>> 7649f753494aa861a6e333284bef4c1909ec3e6f
   const handleFileUpload = async (event, type) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -138,6 +183,7 @@ function App() {
 
     try {
       const endpoint = type === "image" ? "/upload/image" : "/upload/video";
+<<<<<<< HEAD
       await axios.post(`${API_BASE}${endpoint}`, formData);
 
       setCurrentMode(type);
@@ -150,16 +196,42 @@ function App() {
       }, 1000);
 
       alert(`${type.toUpperCase()} processed successfully`);
+=======
+
+      await axios.post(
+        `https://speed-limit-system.onrender.com${endpoint}`,
+        formData,
+        { timeout: 20000 }
+      );
+
+      setCurrentMode(type);
+      alert(`${type.toUpperCase()} uploaded successfully`);
+>>>>>>> 7649f753494aa861a6e333284bef4c1909ec3e6f
 
     } catch (err) {
-      console.error("Upload failed:", err);
+      console.error("Upload failed:", err.message);
     }
   };
 
   // 🎥 Switch back to webcam
   const switchToWebcam = async () => {
+<<<<<<< HEAD
     await axios.post(`${API_BASE}/api/set-webcam`);
     setCurrentMode("webcam");
+=======
+    try {
+      await axios.post(
+        "https://speed-limit-system.onrender.com/api/set-webcam",
+        {},
+        { timeout: 10000 }
+      );
+
+      setCurrentMode("webcam");
+
+    } catch (err) {
+      console.error("Switch mode error:", err.message);
+    }
+>>>>>>> 7649f753494aa861a6e333284bef4c1909ec3e6f
   };
 
   return (
@@ -172,7 +244,11 @@ function App() {
         </h1>
       </header>
 
+<<<<<<< HEAD
       {/* CONTROL PANEL */}
+=======
+      {/* Control Panel */}
+>>>>>>> 7649f753494aa861a6e333284bef4c1909ec3e6f
       <div className="mb-6 flex gap-4 justify-center">
 
         <button onClick={switchToWebcam}
@@ -194,7 +270,11 @@ function App() {
 
       </div>
 
+<<<<<<< HEAD
       {/* CAMERA */}
+=======
+      {/* Camera */}
+>>>>>>> 7649f753494aa861a6e333284bef4c1909ec3e6f
       <div className="flex justify-center mb-6">
         <video ref={videoRef} autoPlay muted playsInline
           className="w-80 h-60 border border-cyber-cyan bg-black" />
