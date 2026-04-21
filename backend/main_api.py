@@ -21,17 +21,15 @@ SYSTEM_CONFIG = {
     "new_input_ready": False
 }
 
-# ✅ FIX 1: initialize global variable
+# --- GLOBAL STATE ---
 violation_in_progress = False
 
-# Create uploads directory if it doesn't exist
 UPLOAD_DIR = "uploads"
 if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR)
 
 stop_event = threading.Event()
 
-# --- SHARED STATE ---
 traffic_data = {
     "current_speed": 0,
     "speed_limit": 0,
@@ -41,69 +39,60 @@ traffic_data = {
     "timestamp": ""
 }
 
-# --- ML MODELS ---
+# --- MODELS ---
 detector = UniversalDetector(sign_model_path="models/speed_limit_yolo.pt")
 recognizer = SpeedRecognizer()
 
-# --- HELPER FUNCTION ---
+# --- FRAME PROCESSING ---
 def process_single_frame(frame):
     detected_limit = 0
     sign_results = detector.detect_signs(frame)
 
-    print("DETECTIONS:", len(sign_results))  # DEBUG
-
     for r in sign_results:
         for box in r.boxes:
-            print("BOX FOUND")  # DEBUG
-
             x1, y1, x2, y2 = map(int, box.xyxy[0])
             sign_crop = frame[y1:y2, x1:x2]
-
-            # Save debug crop
-            cv2.imwrite("debug_crop.jpg", sign_crop)
 
             processed_crop = preprocess_for_ocr(sign_crop)
 
             if processed_crop is not None:
                 speed_text = recognizer.extract_speed(processed_crop)
 
-                if speed_text is not None:
-                    speed_text = str(speed_text)
-                    print("OCR RAW:", speed_text)
-
-                    digits = re.findall(r'\d+', speed_text)
+                if speed_text:
+                    digits = re.findall(r'\d+', str(speed_text))
                     if digits:
                         detected_limit = int(digits[0])
 
     return detected_limit
 
 
-# --- MAIN PROCESS ENGINE ---
+# --- MAIN ENGINE ---
 def process_engine(frame, detector, recognizer):
     global traffic_data, violation_in_progress
 
     try:
         limit = process_single_frame(frame)
-        current_speed = 75
-
-        print(f"DEBUG → Speed: {current_speed}, Limit: {limit}")
+        current_speed = 75  # Replace later with real tracking
 
         is_violation = (limit > 0 and current_speed > limit)
 
-        # --- DB LOGIC ---
+        # --- DATABASE DEBOUNCING ---
         if is_violation:
             if not violation_in_progress:
-                print("NEW VIOLATION → Saving to DB")
+                print("🚨 Saving violation to DB")
                 save_violation(speed=current_speed, limit=limit)
                 violation_in_progress = True
         else:
             violation_in_progress = False
 
-        # --- Update state ---
+        # --- UPDATE STATE ---
         traffic_data["current_speed"] = current_speed
         traffic_data["speed_limit"] = limit
         traffic_data["status"] = "Violation" if is_violation else "Safe"
+        traffic_data["violation_detected"] = is_violation
         traffic_data["timestamp"] = time.strftime("%H:%M:%S")
+
+        print(f"DEBUG → Speed: {current_speed}, Limit: {limit}")
 
     except Exception as e:
         print("AI ERROR:", e)
@@ -119,17 +108,17 @@ def run_ai_logic():
         mode = SYSTEM_CONFIG["mode"]
         source = SYSTEM_CONFIG["source_path"]
 
-        # Webcam handled in frontend
+        # --- WEBCAM MODE ---
         if mode == "webcam":
             time.sleep(0.1)
             continue
 
-        # VIDEO MODE
+        # --- VIDEO MODE ---
         if mode == "video" and source:
             cap = cv2.VideoCapture(source)
-            print("AI Thread: Starting video...")
+            print("🎬 Processing video...")
 
-            while not stop_event.is_set() and not SYSTEM_CONFIG["new_input_ready"]:
+            while not stop_event.is_set():
                 success, frame = cap.read()
                 if not success:
                     break
@@ -138,17 +127,20 @@ def run_ai_logic():
 
             cap.release()
 
-        # IMAGE MODE
+            SYSTEM_CONFIG["new_input_ready"] = False
+
+        # --- IMAGE MODE ---
         elif mode == "image" and source:
-            print(f"AI Thread: Processing image: {source}")
+            print(f"🖼 Processing image: {source}")
+
             frame = cv2.imread(source)
 
             if frame is not None:
                 process_engine(frame, detector, recognizer)
             else:
-                print("Failed to read image")
+                print("❌ Failed to read image")
 
-            # ✅ FIX 2: STOP LOOPING
+            # Reset after one run
             SYSTEM_CONFIG["mode"] = "idle"
             SYSTEM_CONFIG["source_path"] = None
             SYSTEM_CONFIG["new_input_ready"] = False
@@ -156,24 +148,23 @@ def run_ai_logic():
         time.sleep(0.1)
 
 
-# --- LIFESPAN ---
+# --- LIFECYCLE ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if os.path.exists(UPLOAD_DIR):
         shutil.rmtree(UPLOAD_DIR)
     os.makedirs(UPLOAD_DIR, exist_ok=True)
-    print("Cleaned uploads")
 
     init_db()
 
     thread = threading.Thread(target=run_ai_logic, daemon=True)
     thread.start()
-    print("AI Thread started")
+    print("🚀 AI Thread started")
 
     yield
 
     stop_event.set()
-    print("Shutting down...")
+    print("🛑 Shutting down...")
 
 
 # --- APP ---
@@ -183,8 +174,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "https://speed-limit-system.onrender.com"
+        "https://speed-limit-system.vercel.app"
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -199,15 +189,16 @@ def root():
 
 
 @app.get("/api/history")
-async def get_history():
-    return get_recent_violations(limit=10)
+def get_history():
+    return get_recent_violations(limit=50)
 
 
 @app.get("/api/data")
-async def get_data():
+def get_data():
     return traffic_data
 
 
+# --- IMAGE UPLOAD ---
 @app.post("/upload/image")
 async def upload_image(file: UploadFile = File(...)):
     file_path = os.path.join(UPLOAD_DIR, file.filename)
@@ -222,6 +213,32 @@ async def upload_image(file: UploadFile = File(...)):
     return {"message": "Image uploaded"}
 
 
+# --- VIDEO UPLOAD ---
+@app.post("/upload/video")
+async def upload_video(file: UploadFile = File(...)):
+    file_path = os.path.join(UPLOAD_DIR, file.filename)
+
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    SYSTEM_CONFIG["mode"] = "video"
+    SYSTEM_CONFIG["source_path"] = file_path
+    SYSTEM_CONFIG["new_input_ready"] = True
+
+    return {"message": "Video uploaded"}
+
+
+# --- SWITCH TO WEBCAM ---
+@app.post("/api/set-webcam")
+async def set_webcam():
+    SYSTEM_CONFIG["mode"] = "webcam"
+    SYSTEM_CONFIG["source_path"] = None
+    SYSTEM_CONFIG["new_input_ready"] = True
+
+    return {"message": "Webcam activated"}
+
+
+# --- FRAME API ---
 @app.post("/api/process-frame")
 async def process_frame(file: UploadFile = File(...)):
     contents = await file.read()
@@ -245,6 +262,7 @@ async def process_frame(file: UploadFile = File(...)):
     }
 
 
+# --- RUN ---
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
